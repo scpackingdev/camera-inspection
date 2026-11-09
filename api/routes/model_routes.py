@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from database import get_db, PartRule, Transaction, log_audit_event
+from database import get_db, PartRule, PartConfig, Transaction, log_audit_event
 from api.auth import get_current_user_name
 from core import model_cache
 from core.rules import is_defect_label
@@ -64,6 +64,12 @@ def get_models(db: Session = Depends(get_db)):
                 parts_dict[part_no]["has_pt"] = True
                 parts_dict[part_no]["pt_size_mb"] = size_mb
 
+    configs = {c.p_no: c.requires_trigger for c in db.query(PartConfig).all()}
+    rule_configs = {}
+    for r in db.query(PartRule.p_no, PartRule.requires_trigger).all():
+        if r.requires_trigger:
+            rule_configs[r.p_no] = True
+
     for p_no, item in parts_dict.items():
         if item["has_onnx"]:
             item["format"] = "ONNX"
@@ -73,8 +79,52 @@ def get_models(db: Session = Depends(get_db)):
             item["format"] = "PT"
             item["filename"] = f"{p_no}.pt"
             item["size_mb"] = item["pt_size_mb"]
+        item["requires_trigger"] = bool(configs.get(p_no, rule_configs.get(p_no, False)))
 
     return list(parts_dict.values())
+
+class ToggleTriggerSchema(BaseModel):
+    requires_trigger: Optional[bool] = None
+
+@router.post("/models/{part_no}/toggle-trigger")
+def toggle_model_trigger(part_no: str, payload: Optional[ToggleTriggerSchema] = None, db: Session = Depends(get_db), uname: str = Depends(get_current_user_name)):
+    """Toggle mode inspeksi part antara Mode Trigger (Tombol MULAI per pcs) vs Mode Otomatis (Langsung deteksi)."""
+    safe_part_no = sanitize_part_no(part_no)
+    cfg = db.query(PartConfig).filter(PartConfig.p_no == safe_part_no).first()
+    
+    if payload and payload.requires_trigger is not None:
+        new_val = payload.requires_trigger
+    else:
+        new_val = not (cfg.requires_trigger if cfg else False)
+        
+    if not cfg:
+        cfg = PartConfig(p_no=safe_part_no, requires_trigger=new_val)
+        db.add(cfg)
+    else:
+        cfg.requires_trigger = new_val
+        
+    # Sinkronisasi ke PartRule jika ada
+    db.query(PartRule).filter(PartRule.p_no == safe_part_no).update({PartRule.requires_trigger: new_val})
+    db.commit()
+    
+    # Jika transaksi aktif saat ini menggunakan part ini, sinkronisasikan state real-time
+    with state.lock:
+        if state.p_no == safe_part_no and state.status in ["RUNNING", "OK"]:
+            state.requires_trigger = new_val
+            if not new_val:
+                state.is_triggered = True
+            else:
+                state.is_triggered = False
+
+    status_str = "Mode Trigger (Tombol MULAI)" if new_val else "Mode Otomatis (Langsung)"
+    log_audit_event(db, uname, "TOGGLE_TRIGGER_MODE", f"Ubah mode inspeksi part {safe_part_no} menjadi {status_str}")
+    
+    return {
+        "success": True, 
+        "part_no": safe_part_no, 
+        "requires_trigger": new_val,
+        "message": f"Part {safe_part_no} sekarang menggunakan {status_str}."
+    }
 
 @router.post("/models/{part_no}/convert-onnx")
 def convert_model_to_onnx(part_no: str, db: Session = Depends(get_db), uname: str = Depends(get_current_user_name)):
@@ -185,6 +235,11 @@ def get_model_detail(part_no: str, db: Session = Depends(get_db)):
     mtime = datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%d %H:%M:%S')
     size_mb = round(os.path.getsize(file_path) / (1024 * 1024), 2)
 
+    cfg = db.query(PartConfig).filter(PartConfig.p_no == safe_part_no).first()
+    req_trigger = cfg.requires_trigger if cfg else False
+    if not req_trigger and rules:
+        req_trigger = any(getattr(r, 'requires_trigger', False) for r in rules)
+
     return {
         "part_no": safe_part_no,
         "filename": os.path.basename(file_path),
@@ -194,6 +249,7 @@ def get_model_detail(part_no: str, db: Session = Depends(get_db)):
         "size_mb": size_mb,
         "last_modified": mtime,
         "komponen_count": len(components),
+        "requires_trigger": req_trigger,
         "komponen": components
     }
 

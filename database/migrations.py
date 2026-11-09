@@ -28,6 +28,8 @@ def auto_migrate_schema():
                     conn.execute(text("ALTER TABLE part_rules ADD COLUMN IF NOT EXISTS avg_confidence DOUBLE PRECISION DEFAULT 0.75;"))
                 if "min_coverage" not in cols:
                     conn.execute(text("ALTER TABLE part_rules ADD COLUMN IF NOT EXISTS min_coverage DOUBLE PRECISION DEFAULT 1.0;"))
+                if "requires_trigger" not in cols:
+                    conn.execute(text("ALTER TABLE part_rules ADD COLUMN IF NOT EXISTS requires_trigger BOOLEAN DEFAULT FALSE;"))
             
             if "inspection_logs" in tables:
                 cols = [c["name"] for c in inspector.get_columns("inspection_logs")]

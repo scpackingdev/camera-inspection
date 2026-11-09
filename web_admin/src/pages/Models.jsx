@@ -25,6 +25,7 @@ export default function Models() {
   const [labelPreview, setLabelPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [convertingPartNo, setConvertingPartNo] = useState(null);
+  const [togglingPartNo, setTogglingPartNo] = useState(null);
 
   // Detail Modal State
   const [selectedDetail, setSelectedDetail] = useState(null);
@@ -47,6 +48,22 @@ export default function Models() {
   useEffect(() => {
     fetchModels();
   }, []);
+
+  const handleToggleTrigger = async (targetPno) => {
+    setTogglingPartNo(targetPno);
+    try {
+      const res = await api.post(`/api/admin/models/${encodeURIComponent(targetPno)}/toggle-trigger`);
+      toast.success(res.data?.message || 'Mode inspeksi part berhasil diperbarui!');
+      fetchModels();
+      if (selectedDetail && selectedDetail.part_no === targetPno) {
+        setSelectedDetail((prev) => prev ? { ...prev, requires_trigger: res.data?.requires_trigger } : null);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal mengubah mode inspeksi part');
+    } finally {
+      setTogglingPartNo(null);
+    }
+  };
 
   const openUploadModal = () => {
     setEditingPartNo(null);
@@ -224,7 +241,9 @@ export default function Models() {
         models={models}
         loading={loading}
         convertingPartNo={convertingPartNo}
+        togglingPartNo={togglingPartNo}
         onConvertOnnx={handleConvertOnnx}
+        onToggleTrigger={handleToggleTrigger}
         onOpenDetail={handleOpenDetail}
         onOpenEdit={openEditModal}
         onDelete={(partNo) => setDeletePartNo(partNo)}
@@ -233,6 +252,8 @@ export default function Models() {
       {/* Detail Model Labels Modal */}
       <ModelDetailModal
         selectedDetail={selectedDetail}
+        togglingPartNo={togglingPartNo}
+        onToggleTrigger={handleToggleTrigger}
         onClose={() => setSelectedDetail(null)}
         onDownload={handleDownloadModel}
       />

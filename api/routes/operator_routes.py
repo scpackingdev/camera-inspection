@@ -82,6 +82,19 @@ def _get_operator_state_dict() -> dict:
         front_ok_notif_ts = getattr(state, 'front_ok_notif_ts', 0.0)
         is_front_ok = bool(front_ok_notif_ts > 0 and (time.time() - front_ok_notif_ts) < 2.5)
 
+        requires_trigger = getattr(state, 'requires_trigger', False)
+        is_triggered = getattr(state, 'is_triggered', True)
+        waiting_trigger = bool(
+            requires_trigger 
+            and not is_triggered 
+            and cur_status in ["RUNNING", "OK"] 
+            and qty_rem > 0 
+            and not part_ok 
+            and not is_part_ok 
+            and not flip_part 
+            and not is_front_ok
+        )
+
     ng_active = bool(stream_worker.ng_active or cur_status == "NG")
 
     return {
@@ -93,6 +106,9 @@ def _get_operator_state_dict() -> dict:
         "qty_completed": qty_comp,
         "current_side": "FRONT" if side == "F" else "REAR",
         "inspection_mode": mode,
+        "requires_trigger": requires_trigger,
+        "is_triggered": is_triggered,
+        "waiting_trigger": waiting_trigger,
         "pesan_ui": stream_worker.last_pesan_ui,
         "live_metrics": live_metrics,
         "is_cam_active": stream_worker.is_cam_active,
@@ -112,6 +128,67 @@ def _get_operator_state_dict() -> dict:
             "ng_image_url": "",
             "details": details
         }
+    }
+
+@router.post("/operator/trigger-inspection")
+def trigger_inspection():
+    """Trigger mulai inspeksi untuk pcs aktif (pada part yang memerlukan tombol MULAI)."""
+    with state.lock:
+        curr_status = state.status
+        if curr_status not in ["RUNNING", "OK"]:
+            raise HTTPException(status_code=400, detail="Tidak ada transaksi aktif yang sedang berjalan.")
+        if state.qty <= 0:
+            raise HTTPException(status_code=400, detail="Seluruh target part sudah selesai diperiksa.")
+        
+        state.is_triggered = True
+        state.ok_start_time = 0.0
+        state.ng_start_time = 0.0
+        curr_pcs = (state.target_qty - state.qty) + 1
+        stream_worker.last_pesan_ui = f"Inspeksi Part #{curr_pcs} Dimulai... AI Memverifikasi."
+        
+    return {
+        "success": True, 
+        "message": f"Inspeksi Part #{curr_pcs} aktif.",
+        "p_no": state.p_no,
+        "current_pcs": curr_pcs,
+        "target_qty": state.target_qty
+    }
+
+@router.post("/operator/toggle-trigger")
+def operator_toggle_trigger():
+    """Toggle mode inspeksi part aktif antara Mode Trigger (Tombol MULAI per pcs) vs Mode Otomatis."""
+    with state.lock:
+        if not state.p_no:
+            raise HTTPException(status_code=400, detail="Tidak ada part aktif.")
+        p_no = state.p_no
+        cur_req = getattr(state, 'requires_trigger', False)
+        new_val = not cur_req
+        state.requires_trigger = new_val
+        if new_val:
+            state.is_triggered = False
+        else:
+            state.is_triggered = True
+
+    try:
+        from database import SessionLocal, PartConfig, PartRule
+        with SessionLocal() as db:
+            cfg = db.query(PartConfig).filter(PartConfig.p_no == p_no).first()
+            if not cfg:
+                cfg = PartConfig(p_no=p_no, requires_trigger=new_val)
+                db.add(cfg)
+            else:
+                cfg.requires_trigger = new_val
+            db.query(PartRule).filter(PartRule.p_no == p_no).update({PartRule.requires_trigger: new_val})
+            db.commit()
+    except Exception as e:
+        print(f"[WARN] Gagal update DB PartConfig: {e}")
+
+    status_str = "Mode Trigger (Tombol MULAI)" if new_val else "Mode Otomatis (Langsung)"
+    return {
+        "success": True, 
+        "part_no": p_no, 
+        "requires_trigger": new_val,
+        "message": f"Part {p_no} sekarang menggunakan {status_str}."
     }
 
 @router.get("/operator/state")
@@ -259,10 +336,13 @@ def manual_pass():
                 state.part_ok_ts = time.time()
                 state.flip_part_popup = False
                 state.completed_time = time.time()
+                state.is_triggered = False
                 stream_worker.last_pesan_ui = "BATCH SELESAI (100% OK)! SILAKAN MULAI TRANSAKSI BARU."
             else:
                 state.part_ok_popup = True
                 state.part_ok_ts = time.time()
+                if getattr(state, 'requires_trigger', False):
+                    state.is_triggered = False
                 stream_worker.last_pesan_ui = f"Part Manual OK! Sisa: {rem_qty} PCS. Lanjut part berikutnya."
 
     threading.Thread(target=log_inspeksi_db, args=(cur_id, cur_pno, "OK", 1.0, "MANUAL", op_name), daemon=True).start()
@@ -345,6 +425,9 @@ def resolve_ng(req: Optional[NGResolveRequest] = None, db: Session = Depends(get
         return {"success": True, "message": msg, "status": 99}
 
     elif action_type in ["CONFIRM_REPLACE", "CONFIRM_NG", "REPLACE", "CONFIRM", "YES"]:
+        with state.lock:
+            if getattr(state, 'requires_trigger', False):
+                state.is_triggered = False
         msg = f"Part dikonfirmasi cacat (NG) dan diganti part baru oleh {cur_op}."
         threading.Thread(target=log_inspeksi_db, args=(cur_id, cur_pno, "NG", 0.0, "AI", cur_op), daemon=True).start()
         try:

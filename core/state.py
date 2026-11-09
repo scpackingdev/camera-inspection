@@ -27,6 +27,8 @@ class SystemState:
         self.ng_start_time: float = 0.0
         self.ng_hold_duration: float = 1.0
         self.completed_time: float = 0.0
+        self.requires_trigger: bool = False  # True jika part ini membutuhkan klik tombol MULAI per-pcs
+        self.is_triggered: bool = True       # True jika inspeksi pcs aktif sudah dimulai
         self.operator_name: str = ""       # Nama operator utama
         self.operator_username: str = ""   # Username operator utama
         self.operator_role: str = ""       # Role operator utama
@@ -121,6 +123,8 @@ class SystemState:
             self.live_metrics = {}
             self.ok_start_time = 0.0
             self.ng_start_time = 0.0
+            self.requires_trigger = False
+            self.is_triggered = True
 
     def recover_pending_inspection_state(self):
         """
@@ -129,15 +133,15 @@ class SystemState:
         sebelum server mati/restart, lalu memulihkan state inspeksi secara otomatis tanpa mengulang dari awal.
         """
         try:
-            from database import SessionLocal, Transaction, InspectionLog, PartRule
+            from database import SessionLocal, Transaction, InspectionLog, PartRule, PartConfig
             with SessionLocal() as db:
                 # Cari transaksi status 1 (IN_PROGRESS / PROCESSING) yang paling baru
-                pending_trans = db.query(Transaction).filter(Transaction.status == 1).order_by(Transaction.id.desc()).first()
+                pending_trans = db.query(Transaction).filter(Transaction.status == 1).order_by(Transaction.start_time.desc()).first()
                 if not pending_trans:
                     return
 
                 id_trans = pending_trans.id_trans
-                p_no = pending_trans.p_no
+                p_no = pending_trans.part_no or ""
                 target_qty = pending_trans.target_qty or 1
 
                 # Hitung jumlah part yang sudah lolos OK
@@ -161,6 +165,12 @@ class SystemState:
                     "min_coverage": r.min_coverage
                 } for r in db_rules]
 
+                # Cek apakah part ini membutuhkan trigger MULAI per pcs
+                p_cfg = db.query(PartConfig).filter(PartConfig.p_no == p_no).first()
+                req_trigger = p_cfg.requires_trigger if p_cfg else False
+                if not req_trigger and db_rules:
+                    req_trigger = any(getattr(r, 'requires_trigger', False) for r in db_rules)
+
                 if completed_count >= target_qty:
                     # Transaksi sebenarnya sudah terpenuhi sebelum crash, tandai selesai OK (2)
                     pending_trans.status = 2
@@ -183,6 +193,8 @@ class SystemState:
                     self.front_ok_notif_ts = 0.0
                     self.flip_part_popup = False
                     self.ok_start_time = 0.0
+                    self.requires_trigger = req_trigger
+                    self.is_triggered = not req_trigger
 
                 print("=" * 65)
                 print(f"[CRASH RECOVERY] 🛡️ MEMULIHKAN PROGRESS INSPEKSI SEBELUM SERVER CRASH / RESTART")

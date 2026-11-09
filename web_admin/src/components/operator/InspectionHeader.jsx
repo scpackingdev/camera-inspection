@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Volume2, VolumeX, User, Clock, History, LogOut } from 'lucide-react';
+import { Layers, Volume2, VolumeX, User, Clock, History, LogOut, Play } from 'lucide-react';
 
 export default function InspectionHeader({
   telemetry,
@@ -11,8 +11,16 @@ export default function InspectionHeader({
   localOperatorName,
   loginTimeStr,
   onNavigateHistory,
-  onOpenLogoutModal
+  onOpenLogoutModal,
+  onTriggerInspection,
+  isTriggering
 }) {
+  const sideLabel = (telemetry.current_side === 'FRONT' || telemetry.current_side === 'F')
+    ? 'DEPAN'
+    : (telemetry.current_side === 'REAR' || telemetry.current_side === 'R')
+      ? 'BELAKANG'
+      : (telemetry.current_side || 'DEPAN');
+
   return (
     <header className={`rounded-2xl p-3 sm:p-4 border-2 shadow-xl backdrop-blur-xl transition-all duration-300 shrink-0 ${statusBg}`}>
       <div className="flex flex-col lg:flex-row items-center justify-between gap-3 sm:gap-4">
@@ -35,46 +43,74 @@ export default function InspectionHeader({
           )}
         </div>
 
-        {/* Center Status Banner (Besar & Kontras Tinggi) */}
+        {/* Center Status Banner / Tombol MULAI Trigger Touchscreen */}
         <div className="flex-1 text-center px-4 py-2 rounded-2xl bg-slate-900/80 border border-white/15 shadow-inner min-w-0">
-          <div className="text-xs sm:text-sm font-black text-slate-400 tracking-wider uppercase">
-            STATUS KAMERA
-          </div>
-          <div className={`text-xl sm:text-2xl lg:text-3xl tracking-wide font-black ${statusTextColor}`}>
-            {statusText}
-          </div>
-
-          {/* Verification Hold Progress Bar */}
-          {telemetry.live_metrics?.is_stabilizing && (
-            <div className="w-full max-w-xs mx-auto mt-2 bg-slate-950/80 rounded-full h-2 overflow-hidden border border-teal-500/40">
-              <div 
-                className="bg-gradient-to-r from-teal-500 to-emerald-400 h-full rounded-full transition-all duration-100 ease-out shadow-[0_0_8px_rgba(20,184,166,0.8)]"
-                style={{ width: `${telemetry.live_metrics.hold_progress || 0}%` }}
-              />
-            </div>
-          )}
-
-          {telemetry.status !== 'STANDBY' && telemetry.status !== 'IDLE' && (
-            <div className="text-xs sm:text-sm text-slate-200 font-bold truncate max-w-lg mx-auto mt-0.5">
-              {telemetry.live_metrics?.total_count > 0 ? (
-                <span>
-                  Inspeksi: Labels{' '}
-                  <span className={telemetry.live_metrics.labels_complete ? 'text-emerald-400 font-black' : 'text-rose-400 font-black'}>
-                    {telemetry.live_metrics.detected_count}/{telemetry.live_metrics.total_count}
-                  </span>
-                  {' '}(Min {telemetry.live_metrics.min_coverage || 100}%) | AvgConf:{' '}
-                  <span className={telemetry.live_metrics.avg_conf_ok ? 'text-emerald-400 font-black' : 'text-rose-400 font-black'}>
-                    {telemetry.live_metrics.current_avg_conf}%/{telemetry.live_metrics.target_avg_conf}%
-                  </span>
+          {telemetry.waiting_trigger ? (
+            <div className="py-1">
+              <button
+                type="button"
+                onClick={onTriggerInspection}
+                disabled={isTriggering}
+                title="Sentuh untuk memulai inspeksi part ini"
+                className="w-full min-h-[58px] py-3.5 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 hover:from-emerald-400 hover:to-teal-300 active:scale-95 text-white font-black text-2xl sm:text-3xl shadow-[0_0_25px_rgba(16,185,129,0.7)] border-2 border-white/70 flex items-center justify-center gap-3 cursor-pointer select-none transition-all duration-150 animate-pulse disabled:opacity-50"
+              >
+                <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-white text-white shrink-0" />
+                <span className="tracking-widest">MULAI</span>
+                <span className="text-xs sm:text-sm font-extrabold bg-black/40 px-3 py-1 rounded-full text-emerald-100 ml-1 border border-white/20">
+                  PART #{((telemetry.target_qty || 0) - (telemetry.qty_remaining || 0)) + 1}
                 </span>
-              ) : (
-                <span>{telemetry.pesan_ui ? String(telemetry.pesan_ui).replace(/<[^>]+>/g, '') : '-'}</span>
-              )}
+              </button>
+              <div className="text-xs font-bold text-amber-300 mt-1.5 flex items-center justify-center gap-1.5">
+                <span>⚠️ Posisikan part (TAMPAK {sideLabel}) di jig, lalu sentuh tombol <strong>MULAI</strong></span>
+              </div>
             </div>
+          ) : (
+            <>
+              <div className="text-xs sm:text-sm font-black text-slate-400 tracking-wider uppercase">
+                STATUS KAMERA
+              </div>
+              <div className={`text-xl sm:text-2xl lg:text-3xl tracking-wide font-black ${statusTextColor}`}>
+                {statusText}
+              </div>
+
+              {/* Verification Hold Progress Bar */}
+              {telemetry.live_metrics?.is_stabilizing && (
+                <div className="w-full max-w-xs mx-auto mt-2 bg-slate-950/80 rounded-full h-2 overflow-hidden border border-teal-500/40">
+                  <div 
+                    className="bg-gradient-to-r from-teal-500 to-emerald-400 h-full rounded-full transition-all duration-100 ease-out shadow-[0_0_8px_rgba(20,184,166,0.8)]"
+                    style={{ width: `${telemetry.live_metrics.hold_progress || 0}%` }}
+                  />
+                </div>
+              )}
+
+              {telemetry.status !== 'STANDBY' && telemetry.status !== 'IDLE' && (
+                <div className="text-xs sm:text-sm text-slate-200 font-bold truncate max-w-lg mx-auto mt-0.5">
+                  {telemetry.live_metrics?.total_count > 0 ? (
+                    <span>
+                      Inspeksi: Labels{' '}
+                      <span className={telemetry.live_metrics.labels_complete ? 'text-emerald-400 font-black' : 'text-rose-400 font-black'}>
+                        {telemetry.live_metrics.detected_count}/{telemetry.live_metrics.total_count}
+                      </span>
+                      {' '}(Min {telemetry.live_metrics.min_coverage || 100}%) | AvgConf:{' '}
+                      <span className={telemetry.live_metrics.avg_conf_ok ? 'text-emerald-400 font-black' : 'text-rose-400 font-black'}>
+                        {telemetry.live_metrics.current_avg_conf}%/{telemetry.live_metrics.target_avg_conf}%
+                      </span>
+                    </span>
+                  ) : (
+                    <span>{telemetry.pesan_ui ? String(telemetry.pesan_ui).replace(/<[^>]+>/g, '') : '-'}</span>
+                  )}
+                </div>
+              )}
+            </>
           )}
+
+          {/* Keterangan Sisi / Tampak Part - Selalu tampil baik saat menunggu MULAI maupun saat inspeksi berlangsung */}
           {telemetry.p_no && telemetry.status !== 'STANDBY' && telemetry.status !== 'COMPLETED' && (
-            <div className="text-base sm:text-lg font-black text-emerald-300 mt-1 bg-emerald-950/70 py-1 px-5 rounded-full inline-block border-2 border-emerald-400/50 tracking-widest shadow-lg shadow-emerald-900/40">
-              TAMPAK: {telemetry.current_side === 'FRONT' ? 'DEPAN' : telemetry.current_side === 'REAR' ? 'BELAKANG' : telemetry.current_side}
+            <div className="mt-1.5 flex items-center justify-center">
+              <div className="text-base sm:text-lg font-black text-emerald-300 bg-emerald-950/80 py-1 px-5 rounded-full inline-flex items-center gap-2 border-2 border-emerald-400/60 tracking-widest shadow-lg shadow-emerald-900/40">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                <span>TAMPAK: {sideLabel}</span>
+              </div>
             </div>
           )}
         </div>

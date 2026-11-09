@@ -55,6 +55,13 @@ class PartRule(Base):
     min_confidence = Column(Float, default=0.70)
     avg_confidence = Column(Float, default=0.75)
     min_coverage = Column(Float, default=1.0)
+    requires_trigger = Column(Boolean, default=False)
+
+class PartConfig(Base):
+    __tablename__ = "part_configs"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    p_no = Column(String, unique=True, index=True, nullable=False)
+    requires_trigger = Column(Boolean, default=False)
 
 class GlobalSettings(Base):
     __tablename__ = "global_settings"

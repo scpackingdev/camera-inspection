@@ -185,6 +185,8 @@ class KameraProses:
             current_side = state.current_side
             flip_active = state.flip_part_popup
             part_ok_active = state.part_ok_popup
+            requires_trigger = getattr(state, 'requires_trigger', False)
+            is_triggered = getattr(state, 'is_triggered', True)
             
         pesan_ui = f"Status: {status}"
         color_status = (255, 255, 0)
@@ -273,164 +275,186 @@ class KameraProses:
                     "min_coverage": round(target_coverage * 100, 0),
                 }
 
-            # Lapis 1 & 2: Deteksi label NG dengan token exact-match & Whitelist komponen normal terdaftar
-            # Menghindari false positive pada nama normal seperti 'R-KLIP-KUNING-01', 'SPRING', dll.
-            required_set = {r.strip().lower() for r in required_labels}
-            has_ng = any(
-                is_defect_label(lbl, required_set)
-                for lbl in label_counts.keys()
-            )
-            if has_ng:
-                now = time.time()
+            if requires_trigger and not is_triggered:
                 with state.lock:
                     state.ok_start_time = 0.0
+                    state.ng_start_time = 0.0
                     state.live_metrics["hold_progress"] = 0.0
                     state.live_metrics["is_stabilizing"] = False
+                    state.live_metrics["is_ng_stabilizing"] = False
+                    state.live_metrics["ng_progress"] = 0.0
+                    state.live_metrics["waiting_trigger"] = True
 
-                    if state.ng_start_time == 0.0:
-                        state.ng_start_time = now
-                    ng_elapsed = now - state.ng_start_time
-                    ng_hold_duration = getattr(state, 'ng_hold_duration', 1.0)
-                    ng_progress_ratio = min(1.0, ng_elapsed / ng_hold_duration) if ng_hold_duration > 0 else 1.0
-                    ng_hold_pct = round(ng_progress_ratio * 100, 0)
-                    is_ng_stabilizing = ng_elapsed < ng_hold_duration
+                curr_pcs = (target_qty - qty) + 1
+                side_str = "TAMPAK DEPAN" if current_side == "F" else "TAMPAK BELAKANG"
+                pesan_ui = f"SIAPKAN PART #{curr_pcs} ({side_str}) ➔ KLIK TOMBOL [MULAI] DI ATAS"
+                color_status = (0, 255, 255)
+                cv2_text_parts = [
+                    (f"SIAPKAN PART #{curr_pcs} [{side_str}]: ", (0, 255, 255)),
+                    ("KLIK TOMBOL [MULAI] DI ATAS", (0, 255, 0))
+                ]
+            else:
+                # Lapis 1 & 2: Deteksi label NG dengan token exact-match & Whitelist komponen normal terdaftar
+                # Menghindari false positive pada nama normal seperti 'R-KLIP-KUNING-01', 'SPRING', dll.
+                required_set = {r.strip().lower() for r in required_labels}
+                has_ng = any(
+                    is_defect_label(lbl, required_set)
+                    for lbl in label_counts.keys()
+                )
+                if has_ng:
+                    now = time.time()
+                    with state.lock:
+                        state.ok_start_time = 0.0
+                        state.live_metrics["hold_progress"] = 0.0
+                        state.live_metrics["is_stabilizing"] = False
 
-                    state.live_metrics["ng_progress"] = ng_hold_pct
-                    state.live_metrics["is_ng_stabilizing"] = is_ng_stabilizing
-                    state.live_metrics["ng_elapsed"] = round(ng_elapsed, 1)
-                    state.live_metrics["ng_hold_duration"] = ng_hold_duration
+                        if state.ng_start_time == 0.0:
+                            state.ng_start_time = now
+                        ng_elapsed = now - state.ng_start_time
+                        ng_hold_duration = getattr(state, 'ng_hold_duration', 1.0)
+                        ng_progress_ratio = min(1.0, ng_elapsed / ng_hold_duration) if ng_hold_duration > 0 else 1.0
+                        ng_hold_pct = round(ng_progress_ratio * 100, 0)
+                        is_ng_stabilizing = ng_elapsed < ng_hold_duration
 
-                if is_ng_stabilizing:
-                    amber_bgr = (0, 165, 255)
-                    rose_bgr = (0, 0, 255)
-                    pesan_ui = f"⚠️ INDIKASI CACAT TERDETEKSI ({ng_hold_pct:.0f}%)... MEMVERIFIKASI NG"
-                    color_status = amber_bgr
-                    cv2_text_parts = [
-                        (f"VERIFIKASI NG: ", amber_bgr),
-                        (f"{ng_hold_pct:.0f}%", rose_bgr),
-                        (f" ({ng_elapsed:.1f}s / {ng_hold_duration:.1f}s)", amber_bgr)
-                    ]
-                    # Warning Progress Bar visual on OpenCV frame
-                    bar_x, bar_y, bar_w, bar_h = 20, 70, 260, 14
-                    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (30, 30, 30), -1)
-                    fill_w = int(bar_w * ng_progress_ratio)
-                    if fill_w > 0:
-                        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), (0, 0, 255), -1)
-                    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (180, 180, 180), 1)
+                        state.live_metrics["ng_progress"] = ng_hold_pct
+                        state.live_metrics["is_ng_stabilizing"] = is_ng_stabilizing
+                        state.live_metrics["ng_elapsed"] = round(ng_elapsed, 1)
+                        state.live_metrics["ng_hold_duration"] = ng_hold_duration
+
+                    if is_ng_stabilizing:
+                        amber_bgr = (0, 165, 255)
+                        rose_bgr = (0, 0, 255)
+                        pesan_ui = f"⚠️ INDIKASI CACAT TERDETEKSI ({ng_hold_pct:.0f}%)... MEMVERIFIKASI NG"
+                        color_status = amber_bgr
+                        cv2_text_parts = [
+                            (f"VERIFIKASI NG: ", amber_bgr),
+                            (f"{ng_hold_pct:.0f}%", rose_bgr),
+                            (f" ({ng_elapsed:.1f}s / {ng_hold_duration:.1f}s)", amber_bgr)
+                        ]
+                        # Warning Progress Bar visual on OpenCV frame
+                        bar_x, bar_y, bar_w, bar_h = 20, 70, 260, 14
+                        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (30, 30, 30), -1)
+                        fill_w = int(bar_w * ng_progress_ratio)
+                        if fill_w > 0:
+                            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), (0, 0, 255), -1)
+                        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (180, 180, 180), 1)
+                    else:
+                        with state.lock:
+                            state.ng_start_time = 0.0
+                            state.live_metrics["ng_progress"] = 100.0
+                            state.live_metrics["is_ng_stabilizing"] = False
+                            state.status = "NG"
+                            state.current_side = "F"
+                            state.flip_part_popup = False
+                            state.part_ok_popup = False
+                        status = "NG"
                 else:
                     with state.lock:
                         state.ng_start_time = 0.0
-                        state.live_metrics["ng_progress"] = 100.0
-                        state.live_metrics["is_ng_stabilizing"] = False
-                        state.status = "NG"
-                        state.current_side = "F"
-                        state.flip_part_popup = False
-                        state.part_ok_popup = False
-                    status = "NG"
-            else:
-                with state.lock:
-                    state.ng_start_time = 0.0
-                    if "ng_progress" in state.live_metrics:
-                        state.live_metrics["ng_progress"] = 0.0
-                        state.live_metrics["is_ng_stabilizing"] = False
+                        if "ng_progress" in state.live_metrics:
+                            state.live_metrics["ng_progress"] = 0.0
+                            state.live_metrics["is_ng_stabilizing"] = False
 
-                if total_required_count > 0:
-                    yellow_bgr = (0, 255, 255)
-                    lbl_color_bgr = (0, 0, 255) if not labels_complete else (0, 255, 0)
-                    avg_color_bgr = (0, 0, 255) if not avg_conf_ok else (0, 255, 0)
-                    
-                    pesan_ui = f"Inspeksi: Labels {detected_required_count}/{total_required_count} (Min {target_coverage*100:.0f}%) | AvgConf: {current_avg_conf*100:.0f}%/{target_avg_conf*100:.0f}%"
-                    color_status = yellow_bgr
+                    if total_required_count > 0:
+                        yellow_bgr = (0, 255, 255)
+                        lbl_color_bgr = (0, 0, 255) if not labels_complete else (0, 255, 0)
+                        avg_color_bgr = (0, 0, 255) if not avg_conf_ok else (0, 255, 0)
                         
-                    cv2_text_parts = [
-                        (f"Inspeksi: Labels ", yellow_bgr),
-                        (f"{detected_required_count}/{total_required_count}", lbl_color_bgr),
-                        (f" (Min {target_coverage*100:.0f}%) | AvgConf: ", yellow_bgr),
-                        (f"{current_avg_conf*100:.0f}%/{target_avg_conf*100:.0f}%", avg_color_bgr)
-                    ]
+                        pesan_ui = f"Inspeksi: Labels {detected_required_count}/{total_required_count} (Min {target_coverage*100:.0f}%) | AvgConf: {current_avg_conf*100:.0f}%/{target_avg_conf*100:.0f}%"
+                        color_status = yellow_bgr
+                            
+                        cv2_text_parts = [
+                            (f"Inspeksi: Labels ", yellow_bgr),
+                            (f"{detected_required_count}/{total_required_count}", lbl_color_bgr),
+                            (f" (Min {target_coverage*100:.0f}%) | AvgConf: ", yellow_bgr),
+                            (f"{current_avg_conf*100:.0f}%/{target_avg_conf*100:.0f}%", avg_color_bgr)
+                        ]
 
-                    if labels_complete and avg_conf_ok and not min_conf_failed:
-                        now = time.time()
-                        with state.lock:
-                            if state.ok_start_time == 0.0:
-                                state.ok_start_time = now
-                            elapsed = now - state.ok_start_time
-                            hold_duration = getattr(state, 'hold_duration', 1.2)
-                            progress_ratio = min(1.0, elapsed / hold_duration) if hold_duration > 0 else 1.0
-                            hold_pct = round(progress_ratio * 100, 0)
-                            is_stabilizing = elapsed < hold_duration
-
-                            state.live_metrics["hold_progress"] = hold_pct
-                            state.live_metrics["is_stabilizing"] = is_stabilizing
-                            state.live_metrics["hold_duration"] = hold_duration
-                            state.live_metrics["hold_elapsed"] = round(elapsed, 1)
-
-                        if is_stabilizing:
-                            cyan_bgr = (255, 200, 0)
-                            green_bgr = (0, 255, 0)
-                            pesan_ui = f"MEMVERIFIKASI PART ({hold_pct:.0f}%)... TAHAN POSISI"
-                            color_status = cyan_bgr
-                            cv2_text_parts = [
-                                (f"VERIFIKASI STABIL: ", cyan_bgr),
-                                (f"{hold_pct:.0f}%", green_bgr),
-                                (f" ({elapsed:.1f}s / {hold_duration:.1f}s)", cyan_bgr)
-                            ]
-                            # Progress Bar visual on OpenCV frame
-                            bar_x, bar_y, bar_w, bar_h = 20, 70, 260, 14
-                            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (30, 30, 30), -1)
-                            fill_w = int(bar_w * progress_ratio)
-                            if fill_w > 0:
-                                cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), (0, 255, 128), -1)
-                            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (180, 180, 180), 1)
-                        else:
-                            # Durasi stabil terpenuhi -> Eksekusi Part OK
+                        if labels_complete and avg_conf_ok and not min_conf_failed:
+                            now = time.time()
                             with state.lock:
-                                state.ok_start_time = 0.0
-                                state.live_metrics["hold_progress"] = 100.0
-                                state.live_metrics["is_stabilizing"] = False
-                                found_labels = []
-                                for req_lbl in required_labels:
-                                    if label_counts.get(req_lbl, 0) > 0:
-                                        c = label_max_conf.get(req_lbl, 0.0)
-                                        found_labels.append(f"- {req_lbl.upper()} : {c*100:.0f}%")
-                                        
-                                state.last_inspection_details = {
-                                    "label_terdeteksi": f"{detected_required_count}/{total_required_count} ({detected_ratio*100:.0f}%)",
-                                    "avg_confidence": f"{current_avg_conf*100:.0f}% / {target_avg_conf*100:.0f}%",
-                                    "found_labels": "\n".join(found_labels)
-                                }
-                                
-                                if current_side == "F" and has_rear:
-                                    state.current_side = "R"
-                                    state.flip_part_popup = False
-                                    state.front_ok_notif_ts = time.time()  # Timestamp event OK sisi depan — frontend cek apakah < 3 detik yang lalu
-                                    pesan_ui = "Sisi Depan OK! Silakan balik part ke Sisi Belakang (REAR)."
-                                    color_status = (0, 255, 0)
-                                else:
-                                    state.qty -= 1
-                                    state.current_side = "F"
-                                    threading.Thread(target=log_inspeksi_db, args=(state.id_trans, state.p_no, "OK", current_avg_conf, "AI", state.operator_name)).start()
+                                if state.ok_start_time == 0.0:
+                                    state.ok_start_time = now
+                                elapsed = now - state.ok_start_time
+                                hold_duration = getattr(state, 'hold_duration', 1.2)
+                                progress_ratio = min(1.0, elapsed / hold_duration) if hold_duration > 0 else 1.0
+                                hold_pct = round(progress_ratio * 100, 0)
+                                is_stabilizing = elapsed < hold_duration
+
+                                state.live_metrics["hold_progress"] = hold_pct
+                                state.live_metrics["is_stabilizing"] = is_stabilizing
+                                state.live_metrics["hold_duration"] = hold_duration
+                                state.live_metrics["hold_elapsed"] = round(elapsed, 1)
+
+                            if is_stabilizing:
+                                cyan_bgr = (255, 200, 0)
+                                green_bgr = (0, 255, 0)
+                                pesan_ui = f"MEMVERIFIKASI PART ({hold_pct:.0f}%)... TAHAN POSISI"
+                                color_status = cyan_bgr
+                                cv2_text_parts = [
+                                    (f"VERIFIKASI STABIL: ", cyan_bgr),
+                                    (f"{hold_pct:.0f}%", green_bgr),
+                                    (f" ({elapsed:.1f}s / {hold_duration:.1f}s)", cyan_bgr)
+                                ]
+                                # Progress Bar visual on OpenCV frame
+                                bar_x, bar_y, bar_w, bar_h = 20, 70, 260, 14
+                                cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (30, 30, 30), -1)
+                                fill_w = int(bar_w * progress_ratio)
+                                if fill_w > 0:
+                                    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), (0, 255, 128), -1)
+                                cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (180, 180, 180), 1)
+                            else:
+                                # Durasi stabil terpenuhi -> Eksekusi Part OK
+                                with state.lock:
+                                    state.ok_start_time = 0.0
+                                    state.live_metrics["hold_progress"] = 100.0
+                                    state.live_metrics["is_stabilizing"] = False
+                                    found_labels = []
+                                    for req_lbl in required_labels:
+                                        if label_counts.get(req_lbl, 0) > 0:
+                                            c = label_max_conf.get(req_lbl, 0.0)
+                                            found_labels.append(f"- {req_lbl.upper()} : {c*100:.0f}%")
+                                            
+                                    state.last_inspection_details = {
+                                        "label_terdeteksi": f"{detected_required_count}/{total_required_count} ({detected_ratio*100:.0f}%)",
+                                        "avg_confidence": f"{current_avg_conf*100:.0f}% / {target_avg_conf*100:.0f}%",
+                                        "found_labels": "\n".join(found_labels)
+                                    }
                                     
-                                    if state.qty <= 0:
-                                        state.status = "COMPLETED"
-                                        state.part_ok_popup = True
-                                        state.part_ok_ts = time.time()
+                                    if current_side == "F" and has_rear:
+                                        state.current_side = "R"
                                         state.flip_part_popup = False
-                                        state.completed_time = time.time()
-                                        threading.Thread(target=SisonSender.send_callback, args=(state.id_trans, 2)).start()
-                                        pesan_ui = "INSPEKSI BATCH SELESAI (OK)!"
+                                        state.front_ok_notif_ts = time.time()  # Timestamp event OK sisi depan — frontend cek apakah < 3 detik yang lalu
+                                        pesan_ui = "Sisi Depan OK! Silakan balik part ke Sisi Belakang (REAR)."
                                         color_status = (0, 255, 0)
                                     else:
-                                        state.part_ok_popup = True
-                                        state.part_ok_ts = time.time()
-                                        pesan_ui = "Part OK! Lanjut part berikutnya."
-                                        color_status = (0, 255, 0)
-                    else:
-                        # Reset timer jika kondisi belum lengkap / terputus
-                        with state.lock:
-                            state.ok_start_time = 0.0
-                            state.live_metrics["hold_progress"] = 0.0
-                            state.live_metrics["is_stabilizing"] = False
+                                        state.qty -= 1
+                                        state.current_side = "F"
+                                        threading.Thread(target=log_inspeksi_db, args=(state.id_trans, state.p_no, "OK", current_avg_conf, "AI", state.operator_name)).start()
+                                        
+                                        if state.qty <= 0:
+                                            state.status = "COMPLETED"
+                                            state.part_ok_popup = True
+                                            state.part_ok_ts = time.time()
+                                            state.flip_part_popup = False
+                                            state.completed_time = time.time()
+                                            state.is_triggered = False
+                                            threading.Thread(target=SisonSender.send_callback, args=(state.id_trans, 2)).start()
+                                            pesan_ui = "INSPEKSI BATCH SELESAI (OK)!"
+                                            color_status = (0, 255, 0)
+                                        else:
+                                            state.part_ok_popup = True
+                                            state.part_ok_ts = time.time()
+                                            if getattr(state, 'requires_trigger', False):
+                                                state.is_triggered = False
+                                            pesan_ui = f"Part OK! Pasang Part ke-{(state.target_qty - state.qty) + 1} lalu klik MULAI."
+                                            color_status = (0, 255, 0)
+                        else:
+                            # Reset timer jika kondisi belum lengkap / terputus
+                            with state.lock:
+                                state.ok_start_time = 0.0
+                                state.live_metrics["hold_progress"] = 0.0
+                                state.live_metrics["is_stabilizing"] = False
 
         elif status == "NG":
             pesan_ui = "STATUS: NG! SILAKAN KONFIRMASI PADA MODAL ALARM."

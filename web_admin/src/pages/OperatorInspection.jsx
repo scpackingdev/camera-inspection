@@ -435,12 +435,44 @@ export default function OperatorInspection() {
     navigate('/login');
   };
 
+  // State & Handler Trigger Inspeksi Per-PCS (Layar Touchscreen)
+  const [isTriggering, setIsTriggering] = useState(false);
+
+  const handleTriggerInspection = async () => {
+    setIsTriggering(true);
+    try {
+      const res = await api.post('/api/operator/trigger-inspection');
+      if (res.data?.success) {
+        soundManager.testSound('ok', 'chime');
+        toast.success(`Inspeksi Part #${res.data.current_pcs} Dimulai!`, { icon: '🔍', duration: 2000 });
+        const stateRes = await api.get('/api/operator/state');
+        if (stateRes.data) setTelemetry(stateRes.data);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal memulai inspeksi part');
+    } finally {
+      setIsTriggering(false);
+    }
+  };
+
+  const handleToggleTriggerMode = async () => {
+    try {
+      const res = await api.post('/api/operator/toggle-trigger');
+      toast.success(res.data?.message || 'Mode inspeksi part berhasil diubah!', { icon: '⚙️' });
+      const stateRes = await api.get('/api/operator/state');
+      if (stateRes.data) setTelemetry(stateRes.data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal mengubah mode inspeksi');
+    }
+  };
+
   // Status Styling Logic
   const isRunning = telemetry.status === 'OK' || telemetry.status === 'RUNNING';
   const isManualMode = isRunning && (telemetry.inspection_mode === 'MANUAL');
   const isNg = telemetry.status === 'NG';
   const isCompleted = telemetry.status === 'COMPLETED';
   const isPopupVisible = showPartOkModal;
+  const isWaitingTrigger = isRunning && telemetry.waiting_trigger;
 
   let statusBg = 'bg-blue-900/80 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-300';
   let statusText = 'STANDBY';
@@ -458,6 +490,10 @@ export default function OperatorInspection() {
     statusBg = 'bg-sky-950/80 border-sky-500';
     statusText = 'SELESAI (OK)';
     statusTextColor = 'text-sky-400 font-bold';
+  } else if (isWaitingTrigger) {
+    statusBg = 'bg-amber-950/85 border-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.5)]';
+    statusText = 'SIAPKAN PART ➔ SENTUH MULAI';
+    statusTextColor = 'text-amber-300 font-black tracking-wider animate-pulse';
   } else if (isRunning) {
     if (isManualMode) {
       statusBg = 'bg-amber-950/80 border-amber-500';
@@ -509,13 +545,19 @@ export default function OperatorInspection() {
         loginTimeStr={loginTimeStr}
         onNavigateHistory={() => navigate('/operator/history')}
         onOpenLogoutModal={() => setShowLogoutModal(true)}
+        onTriggerInspection={handleTriggerInspection}
+        isTriggering={isTriggering}
       />
 
       {/* 2. ACTION TOOLBAR (Permanen, Disabled saat Standby, Aktif saat Transaksi) */}
       <InspectionToolbar
         isRunning={isRunning}
         isNg={isNg}
+        waitingTrigger={telemetry.waiting_trigger}
+        requiresTrigger={telemetry.requires_trigger}
+        pNo={telemetry.p_no}
         onOpenCancelKanban={handleOpenCancelModal}
+        onToggleTriggerMode={handleToggleTriggerMode}
       />
 
       {/* 3. LIVE VIDEO CAMERA STREAM CONTAINER WITH FLOATING POPUPS */}

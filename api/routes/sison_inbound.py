@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 from core import state
-from database import get_db, PartRule, Transaction, SessionLocal, SisonConfig, User, verify_password, log_audit_event
+from database import get_db, PartRule, PartConfig, Transaction, SessionLocal, SisonConfig, User, verify_password, log_audit_event
 from api.auth import decode_admin_token
 from integrations import SisonSender
 
@@ -129,6 +129,12 @@ def execute_sison_start(req: StartRequest, db: Session) -> dict:
         for r in db_rules
     ]
 
+    # Cek apakah part ini membutuhkan trigger tombol MULAI per-pcs
+    p_cfg = db.query(PartConfig).filter(PartConfig.p_no == p_no).first()
+    req_trigger = p_cfg.requires_trigger if p_cfg else False
+    if not req_trigger and db_rules:
+        req_trigger = any(getattr(r, 'requires_trigger', False) for r in db_rules)
+
     with state.lock:
         state.status = "RUNNING"
         state.id_trans = id_trans
@@ -141,6 +147,8 @@ def execute_sison_start(req: StartRequest, db: Session) -> dict:
         state.current_side = "F"
         state.part_ok_popup = False
         state.flip_part_popup = False
+        state.requires_trigger = req_trigger
+        state.is_triggered = not req_trigger
 
     # Kirim Webhook Callback status 1 (Processing / In-Progress) ke Server SISON
     threading.Thread(target=SisonSender.send_callback, args=(id_trans, 1), daemon=True).start()

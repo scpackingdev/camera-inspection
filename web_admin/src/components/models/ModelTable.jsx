@@ -1,17 +1,19 @@
 import React from 'react';
-import { FileCode, Zap, RefreshCw, Eye, Edit2, Trash2 } from 'lucide-react';
+import { FileCode, Zap, RefreshCw, Eye, Edit2, Trash2, Play } from 'lucide-react';
 import DataTable from '../DataTable';
 
 export default function ModelTable({
   models,
   loading,
   convertingPartNo,
+  togglingPartNo,
   onConvertOnnx,
+  onToggleTrigger,
   onOpenDetail,
   onOpenEdit,
   onDelete
 }) {
-  const headers = ["Part Number", "Format & Engine", "Waktu Update", "Status", "Aksi"];
+  const headers = ["Part Number", "Format & Engine", "Mekanisme Inspeksi", "Waktu Update", "Status", "Aksi"];
 
   return (
     <div className="glass-card p-6 border border-white/10 rounded-2xl">
@@ -44,6 +46,36 @@ export default function ModelTable({
                   </span>
                 </div>
               )}
+            </td>
+            <td className="p-4 text-center">
+              <button
+                type="button"
+                onClick={() => onToggleTrigger && onToggleTrigger(m.part_no)}
+                disabled={togglingPartNo === m.part_no}
+                title={m.requires_trigger ? "Klik untuk alihkan ke Mode Otomatis (Langsung)" : "Klik untuk aktifkan Tombol Trigger MULAI per pcs"}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer hover:scale-105 active:scale-95 disabled:opacity-50 select-none ${
+                  m.requires_trigger
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+                    : 'bg-slate-800/80 text-slate-300 border-white/10 hover:border-white/20'
+                }`}
+              >
+                {togglingPartNo === m.part_no ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Menyimpan...</span>
+                  </>
+                ) : m.requires_trigger ? (
+                  <>
+                    <Play className="w-3.5 h-3.5 fill-emerald-400 text-emerald-400" />
+                    <span>Tombol MULAI (Trigger)</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Otomatis (Langsung)</span>
+                  </>
+                )}
+              </button>
             </td>
             <td className="p-4 text-xs text-slate-300 font-mono text-center">
               {m.last_modified || '-'}

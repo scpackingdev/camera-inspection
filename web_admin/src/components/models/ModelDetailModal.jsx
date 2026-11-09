@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Info, Download } from 'lucide-react';
 import { getLabelValidation } from './modelUtils';
 
-export default function ModelDetailModal({ selectedDetail, onClose, onDownload }) {
+export default function ModelDetailModal({ selectedDetail, onClose, onDownload, onToggleTrigger, togglingPartNo }) {
   const [detailFilter, setDetailFilter] = useState('all');
 
   if (!selectedDetail) return null;
@@ -98,6 +98,33 @@ export default function ModelDetailModal({ selectedDetail, onClose, onDownload }
                 {selectedDetail.last_modified}
               </span>
             </div>
+          </div>
+
+          {/* Mekanisme Trigger Box */}
+          <div className="flex flex-col sm:flex-row items-center justify-between p-4 bg-gradient-to-r from-slate-900/90 to-slate-800/80 border border-white/10 rounded-2xl gap-3">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                <span>Mekanisme Inspeksi:</span>
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-black ${selectedDetail.requires_trigger ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'}`}>
+                  {selectedDetail.requires_trigger ? '👆 Mode Trigger (Tombol MULAI Per-PCS)' : '⚡ Mode Otomatis (Langsung Deteksi)'}
+                </span>
+              </div>
+              <p className="text-[11.5px] text-slate-400 mt-1 leading-relaxed">
+                {selectedDetail.requires_trigger 
+                  ? 'Operator wajib menyentuh tombol MULAI di layar atas sebelum kamera mengevaluasi tiap pcs part.'
+                  : 'Kamera langsung mendeteksi dan mengevaluasi part secara otomatis begitu part ditaruh di bawah kamera.'}
+              </p>
+            </div>
+            {onToggleTrigger && (
+              <button
+                type="button"
+                onClick={() => onToggleTrigger(selectedDetail.part_no)}
+                disabled={togglingPartNo === selectedDetail.part_no}
+                className="shrink-0 px-4 py-2 rounded-xl text-xs font-extrabold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all cursor-pointer active:scale-95 disabled:opacity-50 select-none"
+              >
+                {togglingPartNo === selectedDetail.part_no ? 'Menyimpan...' : (selectedDetail.requires_trigger ? 'Alihkan ke Otomatis' : 'Aktifkan Tombol MULAI')}
+              </button>
+            )}
           </div>
 
           {/* Filter Tabs */}

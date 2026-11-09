@@ -1,15 +1,57 @@
+# Environment & Secrets
 .env
-.venv/
+.env.local
+.env.*
+*.env
+
+# Virtual Environments
 venv/
-node_modules/
-weights/
+.venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
-.vscode/
+
+# Database Files
+*.db
+*.sqlite
+*.sqlite3
+
+# AI Models & Weights
+weights/
 *.pt
 *.onnx
-ng_records/*.jpg
-*.db
+*.engine
+*.bin
+
+# Uploads & Media (Preserve folder structure via .gitkeep)
 uploads/*
 !uploads/.gitkeep
+uploads/audio/*
+!uploads/audio/.gitkeep
+ng_records/*.jpg
 
+# Node / Frontend Build & Cache
+node_modules/
+web_admin/node_modules/
+dist/
+web_admin/dist/
+
+# Prompts & Guidelines (Internal)
+antislop*.md
+
+# Logs & Temporary Files
+*.log
+logs/
+.tmp/
+tmp/
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
